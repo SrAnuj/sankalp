@@ -1,7 +1,8 @@
 <?php
 
-function just_test()
-{
-    return 'Hello World !';
-
+function make_lot_of_fun(){
+   return "Hello World !";
 }
+
+
+
