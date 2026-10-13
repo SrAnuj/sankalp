@@ -15,6 +15,15 @@ Route::get('/login', function () {
     ]);
 });
 
+Route::prefix('v1')->group(function () {
+    Route::post('auth/login', [UserController::class, 'loginWithOtp']);
+
+    Route::middleware('auth:api')->group(function () {
+        Route::post('auth/logout', [UserController::class, 'logout']);
+        Route::patch('profile', [UserController::class, 'updateProfile']);
+    });
+});
+
 Route::post('login', [UserController::class, 'login'])->name('login');
 Route::post('register', [UserController::class, 'register']);
 Route::apiResource('users', UserController::class);

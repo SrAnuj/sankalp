@@ -18,6 +18,11 @@ use Illuminate\Notifications\Notifiable;
 use App\Notifications\UserNotification;
 use App\Http\Resources\UserProfileDetailCollection;
 use Illuminate\Support\Facades\Cookie;
+use App\Services\FirebasePhoneAuthService;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Http\JsonResponse;
+use Throwable;
 
 class UserController extends Controller
 {
@@ -35,6 +40,7 @@ class UserController extends Controller
     {
         //
     }
+
     public function login(Request $request){
         $rules = array(
             'username' => 'required',
@@ -60,10 +66,11 @@ class UserController extends Controller
 
             if (!empty($us))
             {
-                 if ($us->status != 1 && $us->user_type="Seller")
+                // FIX: was `$us->user_type="Seller"` (assignment). Now a comparison.
+                if ($us->status != 1 && $us->user_type == "Seller")
                 {
                     $validator = "Your Account is not Approved by admin. Please contact admin for more information!";
-                     $result['message'] = $validator;
+                    $result['message'] = $validator;
                     $result['status'] = 401; $result['success'] = false;
 
                     return response()->json($result);
@@ -71,7 +78,7 @@ class UserController extends Controller
                 if ($us->status != '1')
                 {
                     $validator = "Your Account is deleted or disabled. Please contact admin for more information!";
-                     $result['message'] = $validator;
+                    $result['message'] = $validator;
                     $result['status'] = 401; $result['success'] = false;
 
                     return response()->json($result);
@@ -79,60 +86,57 @@ class UserController extends Controller
                 if (!empty($us->email_verified_at))
                 {
                     $user_id = $us->id;
-                     if (($us && Hash::check(request('password'), $us->password)) ||
-                     ($us && $request->user_type=='user') ){
 
-                            $user = User::findorFail($us->id); //auth('sanctum')->user();
-							
-                            //$user->fcm_token=$request->fcm_token;
-                            //$user->fcm_uid=$request->fcm_uid;
-                            $user->save();
-							$user->avatar = asset('storage/' . $user->avatar);
-                            //$user->package_expires = $user->end_date<date('Y-m-d') || empty($user->end_date) ? true : false;
-							 $token = $user->createToken('tyka')->accessToken;
-                            $result['user'] = $user;
-                            $result['token'] = $user->createToken('tyka')->accessToken;
-                            $result['user_id'] =  $user_id;
-                            $result['status'] = 200; $result['success'] = true;
+                    // FIX: removed `|| ($us && $request->user_type=='user')`.
+                    // That condition let anyone log in without the password.
+                    if ($us && Hash::check(request('password'), $us->password)) {
 
-                            $result['proceed_otp'] = 'No';
-                            $result['message'] = 'login_successfully';
-							
-							if ($user->hasRole('super admin')) {
-								$result['dashboard'] = '/admin/dashboard';
-							} else {
-								$result['dashboard'] = '/';
-							}
+                        $user = User::findorFail($us->id);
 
-							// ✅ ADDED: Also return roles for frontend use
-							$result['roles'] = $user->getRoleNames();
-							$result['permissions'] = $user->getAllPermissions()->pluck('name'); 
-                            // return response()->json($result);
-							
-						return response()->json($result)
-						->cookie(
-							'auth_token',
-							$token,
-							1440,
-							'/',
-							'.premierwebtechservices.com',
-							true,   // secure REQUIRED
-							true,   // httpOnly
-							false,
-							'None'  // REQUIRED for cross-site
-						);
+                        $user->avatar = asset('storage/' . $user->avatar);
 
+                        // FIX: create the token once (was created twice).
+                        $token = $user->createToken('sankalp')->accessToken;
 
+                        $result['user'] = $user;
+                        $result['token'] = $token;
+                        $result['user_id'] =  $user_id;
+                        $result['status'] = 200; $result['success'] = true;
+
+                        $result['proceed_otp'] = 'No';
+                        $result['message'] = 'login_successfully';
+
+                        if ($user->hasRole('super admin')) {
+                            $result['dashboard'] = '/admin/dashboard';
+                        } else {
+                            $result['dashboard'] = '/';
+                        }
+
+                        // Also return roles for frontend use
+                        $result['roles'] = $user->getRoleNames();
+                        $result['permissions'] = $user->getAllPermissions()->pluck('name');
+
+                        return response()->json($result)
+                            ->cookie(
+                                'auth_token',
+                                $token,
+                                1440,
+                                '/',
+                                '.premierwebtechservices.com',
+                                true,   // secure REQUIRED
+                                true,   // httpOnly
+                                false,
+                                'None'  // REQUIRED for cross-site
+                            );
                     }
                     else
                     {
-                             $validator = "Invalid Password!";
-                            $result['message'] = $validator;
-                            $result['status'] = 401; $result['success'] = false;
+                        $validator = "Invalid Password!";
+                        $result['message'] = $validator;
+                        $result['status'] = 401; $result['success'] = false;
 
-                            $result['proceed_otp'] = 'No';
-                            return response()->json($result);
-
+                        $result['proceed_otp'] = 'No';
+                        return response()->json($result);
                     }
                 }
                 else
@@ -142,11 +146,10 @@ class UserController extends Controller
                     $result['user_id'] = $us->id;
                     $result['user'] = $us;
                     $result['proceed_otp'] = 'Yes';
-                    $result['status'] = 401; 
-					$result['success'] = false;
+                    $result['status'] = 401;
+                    $result['success'] = false;
 
                     return response()->json($result);
-
                 }
             }
             else
@@ -157,7 +160,6 @@ class UserController extends Controller
                 $result['status'] = 401; $result['success'] = false;
 
                 return response()->json($result);
-
             }
         }
     }
@@ -167,13 +169,13 @@ class UserController extends Controller
      */
     public function store(Request $request)
     {
-    
+
          $page = $request->page;
          $custom_validation_messages = [
          'name.regex' => "Name can contain only letters. ",
 
-      ]; 
-            $rules = array(   
+      ];
+            $rules = array(
                 'user_type' => 'nullable',
                 'login_type' => 'nullable',
                 'name' => 'bail|required|min:3|regex:/^[A-Za-z\s\-]+$/',  //|regex:/^[A-Za-z\s\-]+$/',
@@ -184,8 +186,8 @@ class UserController extends Controller
                 'fcm_token' => 'nullable',
                 'fcm_uid' => 'nullable',
             );
-  
-       
+
+
         $validator = Validator::make($request->all(), $rules, $custom_validation_messages);
 
         // process the login
@@ -213,7 +215,7 @@ class UserController extends Controller
         $user->user_type = 'User';
         $user->status = true;
         //$user->current_team_id = '1';
-		$user->email_verified_at = now();
+        $user->email_verified_at = now();
         $user->save();
 
         function random_strings($length_of_string)
@@ -223,9 +225,9 @@ class UserController extends Controller
         }
         //$user->refferal_code = random_strings(10).'_'.$user->id;
         $user->save();
-		
-		$user->assignRole('User'); 
-        
+
+        $user->assignRole('User');
+
         $tp=empty($request->phone) ? $request->email : $request->phone;
          $admin = User::whereHas('roles', function ($query){
         $query->where('name','=','super admin');
@@ -243,25 +245,25 @@ class UserController extends Controller
             'sender_id' => $user->id,
         ];
         $admins = User::where('user_type','Admin')->get();
-         Notification::send($admins, new UserNotification($details)); 
+         Notification::send($admins, new UserNotification($details));
         event(new NotificationEvent($details));
 
-        if($request->login_type=='email' || $request->login_type=='phone') { 
+        if($request->login_type=='email' || $request->login_type=='phone') {
                 $url=Config::get('app.url');
-                $data['logo']=$url."public/images/logo/logo.png";        
+                $data['logo']=$url."public/images/logo/logo.png";
 
                 $data['email'] = $user->email;
                 $data['name'] = $user->name;
                 $email = $user->email;
-				
+
                   //$user->sendEmailVerificationNotification();
                 //Mail::to($email)->send(new VerificationEmail($data));
-				$user->notify(new GreetingMail());
+                $user->notify(new GreetingMail());
 
 
         $result['message'] = 'Your Account is created successfully. Please verify your email id by visiting your registered email.';
         } else {
-        $result['message'] = 'Your Account is created successfully. Please login.';    
+        $result['message'] = 'Your Account is created successfully. Please login.';
         }
 
         $result['status'] = 200; $result['success'] = true;
@@ -271,6 +273,142 @@ class UserController extends Controller
 
         return response()->json($result);
 
+    }
+
+    /**
+     * Mobile app phone login.
+     * Flutter sends the Firebase ID token, we verify it and return a Passport token.
+     */
+    public function loginWithOtp(
+        Request $request,
+        FirebasePhoneAuthService $firebase
+    ): JsonResponse {
+        $validated = $request->validate([
+            'id_token' => ['required', 'string', 'max:10000'],
+        ]);
+
+        try {
+            $identity = $firebase->verify($validated['id_token']);
+
+            $phone    = $identity['phone'];                         // +919876543210
+            $national = substr(preg_replace('/\D/', '', $phone), -10); // 9876543210
+
+            $user = DB::transaction(function () use ($identity, $phone, $national) {
+                $user = User::query()
+                    ->where('firebase_uid', $identity['uid'])
+                    ->first();
+
+                if (!$user) {
+                    // Match both "+91..." and plain 10 digit numbers saved by the web app.
+                    $user = User::query()
+                        ->whereIn('phone', [$phone, $national])
+                        ->first();
+                }
+
+                if ($user) {
+                    if (
+                        $user->firebase_uid &&
+                        $user->firebase_uid !== $identity['uid']
+                    ) {
+                        throw new \RuntimeException(
+                            'This phone number is linked to another account.'
+                        );
+                    }
+
+                    if ($user->status !== null && (int) $user->status === 0) {
+                        throw new \RuntimeException('This account is disabled.');
+                    }
+
+                    $user->firebase_uid = $identity['uid'];
+
+                    // Keep the phone format already stored for this user.
+                    if (empty($user->phone)) {
+                        $user->phone = $phone;
+                    }
+
+                    $user->save();
+
+                    return $user;
+                }
+
+                // First login: create the account. Name is asked later in the app.
+                $user = new User();
+                $user->forceFill([
+                    'name'         => null,
+                    'phone'        => $phone,
+                    'firebase_uid' => $identity['uid'],
+                    'user_type'    => 'User',
+                    'status'       => 1,
+                ])->save();
+
+                $user->assignRole('User');
+
+                return $user;
+            });
+
+            $token = $user->createToken('naamvriddhi-mobile');
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Login successful.',
+                'data' => [
+                    'user' => [
+                        'id' => $user->id,
+                        'name' => $user->name,
+                        'phone' => $user->phone,
+                    ],
+                    'access_token' => $token->accessToken,
+                    'token_type' => 'Bearer',
+                ],
+            ]);
+        } catch (Throwable $exception) {
+            Log::warning('Digital Naam lekhan OTP login failed', [
+                'exception' => get_class($exception),
+                'message'   => $exception->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Unable to verify login. Please try again.',
+            ], 401);
+        }
+    }
+
+    /**
+     * Mobile app: save the user's name (Name screen after first login).
+     */
+    public function updateProfile(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            // Letters from any language (Hindi, Punjabi, English), spaces, dots, hyphens.
+            'name' => ['required', 'string', 'min:2', 'max:40', 'regex:/^[\p{L}\p{M}\s.\-]+$/u'],
+        ]);
+
+        $user = $request->user();
+        $user->name = trim($validated['name']);
+        $user->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Profile updated.',
+            'data' => [
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'phone' => $user->phone,
+                ],
+            ],
+        ]);
+    }
+
+    public function logout(Request $request): JsonResponse
+    {
+        $request->user()->token()->revoke();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Logged out successfully.',
+        ]);
     }
 
     /**
@@ -301,4 +439,5 @@ class UserController extends Controller
      * Remove the specified resource from storage.
      */
     public function destroy(string $id) {}
+
 }
