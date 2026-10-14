@@ -23,14 +23,36 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Http\JsonResponse;
 use Throwable;
+use App\Http\Resources\UserListCollection;
 
 class UserController extends Controller
 {
     /**
      * Display a listing of the resource.
      */
-    public function index() {
-        dd("Hello wordl");
+    public function index(Request $request){
+        $search  = $request->get('search');
+        $sortBy  = $request->get('sortBy', 'created_at'); // default sort column
+        $sortDir = $request->get('sortDir', 'desc');      // default sort direction
+        $perPage = (int) $request->get('perPage', 10);    // default 10 per page
+
+        $query = User::where('status', '!=', 2)
+            ->whereHas('roles', function ($q) {
+                $q->where('name', '!=', 'user'); // only roles not equal to 'user'
+            });
+
+        if (!empty($search)) {
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('email', 'like', "%{$search}%")
+                  ->orWhere('phone', 'like', "%{$search}%");
+            });
+        }
+
+        $users = $query->orderBy($sortBy, $sortDir)
+                       ->paginate($perPage);
+
+        return new UserListCollection($users);
     }
 
     /**
@@ -167,7 +189,7 @@ class UserController extends Controller
     /**
      * Store a newly created resource in storage.
      */
-    public function store(Request $request)
+    public function register(Request $request)
     {
 
          $page = $request->page;
@@ -274,6 +296,105 @@ class UserController extends Controller
         return response()->json($result);
 
     }
+
+
+    public function store(Request $request){
+        
+        
+        
+        $before = now()->subYears(13)->format('Y-m-d');
+
+        $messages = [
+            'name.regex' => "Name can contain only letters.",
+        ];
+
+        $rules = [
+            'name' => 'bail|required|min:3|regex:/^[A-Za-z\s\-]+$/',
+            'phone' => 'bail|required|regex:/^([0-9\s\-\+\(\)]*)$/|min:10|max:15|unique:users,phone',
+            'email' => 'bail|required|email|unique:users,email',
+            'password' => 'bail|required|min:6',
+            'avatar' => [
+                'nullable',
+                'string',
+                'regex:/^data:image\/(jpeg|jpg|png|gif);base64,/',
+            ],
+            'roles' => 'nullable|array',
+            'roles.*' => 'numeric|exists:roles,id',
+        ];
+
+        $validator = Validator::make($request->all(), $rules, $messages);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => implode(' ', $validator->errors()->all()),
+                'status' => 422,
+                'success' => false,
+            ]);
+        }
+
+        $avatar = 'users/default.png';
+
+        if ($request->hasFile('avatar')) {
+            $avatar = $request->file('avatar')->store('avatars', 'public');
+        } elseif ($request->filled('avatar') && Str::startsWith($request->avatar, 'data:image')) {
+            $avatar = $this->saveBase64Avatar($request->avatar, $request->name);
+        }
+
+        $user = new User();
+        $user->name = $request->name;
+        $user->phone = $request->phone;
+        $user->email = $request->email;
+        $user->avatar = $avatar;
+        $user->status = $request->status == 'active' ? 1 : 0;
+        $user->gender = $request->gender;
+        $user->password = Hash::make($request->password);
+        $user->user_type = $request->user_type ?? 'User';
+        $user->email_verified_at = Carbon::now();
+        $user->created_by = auth('api')->id();
+        $user->save();
+
+        // Sync roles if provided
+         if ($request->filled('roles')) {
+
+        $roleIds = collect($request->input('roles'))
+            ->map(fn ($role) => (int) $role)
+            ->toArray();
+
+        $apiRoles = Role::whereIn('id', $roleIds)
+            ->where('guard_name', 'api')
+            ->pluck('id')
+            ->toArray();
+
+        $user->syncRoles($apiRoles);
+    }
+
+        // Send verification email
+        /* if ($user instanceof \Illuminate\Contracts\Auth\MustVerifyEmail && !$user->hasVerifiedEmail()) {
+            $user->sendEmailVerificationNotification();
+        }
+ */
+        return response()->json([
+            'message' => 'User created successfully!',
+            'status' => 200,
+            'success' => true,
+            'data' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                /* 'needs_verification' => !$user->hasVerifiedEmail(), */
+            ],
+        ]);
+    }
+    private function saveBase64Avatar($base64Image, $username){
+            [$type, $data] = explode(';', $base64Image);
+            [, $encoded] = explode(',', $data);
+            preg_match('/data:image\/(.*)/', $type, $matches);
+            $extension = $matches[1] ?? 'png';
+            $filename = 'avatars/' . Str::slug($username) . '_' . time() . '.' . $extension;
+            Storage::disk('public')->put($filename, base64_decode($encoded));
+
+            return $filename;
+        }
 
     /**
      * Mobile app phone login.
@@ -411,12 +532,61 @@ class UserController extends Controller
         ]);
     }
 
+    public function updateStatus(Request $request, $id){
+        $request->validate([
+            'status' => 'required|boolean', // true = active, false = blocked
+        ]);
+
+        $user = User::find($id);
+
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'status'  => 404,
+                    'message' => 'User not found',
+                ], 404);
+            }
+
+            $user->status = $request->status;
+            $user->save();
+
+            return response()->json([
+                'success' => true,
+                'status'  => 200,
+                'message' => $user->status ? 'User unblocked successfully' : 'User blocked successfully',
+                'data'    => [
+                    'id'     => $user->id,
+                    'name'   => $user->name,
+                    'email'  => $user->email,
+                    'status' => $user->status ? 'active' : 'blocked',
+                ],
+            ], 200);
+        }
+
     /**
      * Display the specified resource.
      */
-    public function show(string $id)
-    {
-        //
+    public function show($id){
+        
+        // $user = auth('api')->user();
+
+        // if (!$user) {
+        //     return response()->json([
+        //         'success' => false,
+        //         'status'  => 401,
+        //         'message' => 'Unauthorized access. Please log in first.',
+        //     ], 401);
+        // }
+
+        //         if ($user->id != $id && !$user->hasRole('super admin')) {
+        //         return response()->json([
+        //             'success' => false,
+        //             'status'  => 403,
+        //             'message' => 'You are not authorized to view this profile.',
+        //         ], 403);
+        //     }
+
+        return new UserProfileDetailCollection(User::where('id', $id)->get());
     }
 
     /**
@@ -424,20 +594,145 @@ class UserController extends Controller
      */
     public function edit(string $id)
     {
-        //
+      return new UserProfileDetailCollection(User::where('id', $id)->get());
     }
-
     /**
      * Update the specified resource in storage.
      */
-    public function update(Request $request, string $id)
-    {
-        //
-    }
+    public function update(Request $request, $id){
+        $user = User::findOrFail($id);
 
+        $messages = [
+            'name.regex' => "Name can contain only letters.",
+        ];
+
+        $rules = [
+            'name' => 'bail|required|min:3|regex:/^[A-Za-z\s\-]+$/',
+            'phone' => 'bail|required|regex:/^([0-9\s\-\+\(\)]*)$/|min:10|max:15,' . $user->id,
+            'email' => 'bail|required|email,' . $user->id,
+            'password' => 'nullable|min:6',
+            'avatar' => [
+                'nullable',
+                'file',
+                'mimes:jpeg,jpg,png,gif',
+                'max:2048',
+            ],
+            'roles' => 'nullable|array',
+            'roles.*' => 'numeric|exists:roles,id',
+        ];
+
+        $validator = Validator::make($request->all(), $rules, $messages);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => implode(' ', $validator->errors()->all()),
+                'status' => 422,
+                'success' => false,
+            ]);
+        }
+
+        // Avatar handling
+        if ($request->hasFile('avatar')) {
+            $user->avatar = $request->file('avatar')->store('avatars', 'public');
+        } elseif ($request->filled('avatar') && Str::startsWith($request->avatar, 'data:image')) {
+            $user->avatar = $this->saveBase64Avatar($request->avatar, $request->name);
+        }
+
+        // Update other fields
+        $user->name = $request->name;
+        $user->phone = $request->phone;
+        $user->email = $request->email;
+        $user->status = $request->has('status')
+        ? ($request->status == 1 ? 1 : 0)
+        : 1;
+        $user->gender = $request->gender;
+        if ($request->filled('password')) {
+            $user->password = Hash::make($request->password);
+            $user->login_token_version++;
+
+        }
+        $user->user_type = $request->user_type ?? $user->user_type;
+        $user->created_by = auth('api')->id(); // optional audit
+        $user->save();
+
+        // Sync roles if provided
+        if ($request->filled('roles')) {
+
+            $roleIds = collect($request->input('roles'))
+                ->map(fn ($role) => (int) $role)
+                ->toArray();
+
+            $apiRoles = Role::whereIn('id', $roleIds)
+                ->where('guard_name', 'api')
+                ->pluck('id')
+                ->toArray();
+
+            $user->syncRoles($apiRoles);
+        }
+                // Prepare user data with full avatar URL
+                $userData = $user->toArray();
+                $userData['avatar'] = $user->avatar ? asset('storage/' . $user->avatar) : null;
+
+                return response()->json([
+                    'message' => 'User updated successfully.',
+                    'status' => 200,
+                    'success' => true,
+                    'data' => $userData,
+                ]);
+            }
     /**
      * Remove the specified resource from storage.
      */
-    public function destroy(string $id) {}
+    public function destroy($id){
+        $customer = User::find($id);
+        if (!$customer) {
+            return response()->json([
+                'status' => 404,
+                'success' => false,
+                'message' => 'Customer not found.',
+            ]);
+        }
+        $customer->status = 2; // set status first
+        $customer->save();
+        //$customer->delete();   // then delete
+        return response()->json([
+            'status' => 200,
+            'success' => true,
+            'message' => 'Customer deleted successfully.',
+        ]);
+    }
+    public function bulk_user_delete(Request $request){
+        $validator = Validator::make($request->all(), [
+            'ids'   => 'required|array|min:1',
+            'ids.*' => 'integer|exists:users,id', // table: users
+        ], [
+            'ids.required' => 'Please select at least one user to delete.',
+            'ids.array'    => 'Invalid request format.',
+            'ids.*.exists' => 'One or more users do not exist.',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'status'  => 422,
+                'errors'  => $validator->errors(),
+            ], 422);
+        }
+
+        // Optional: filter by role, e.g., only delete users with role 'user'
+        // $count = User::whereIn('id', $request->ids)
+        //     ->whereHas('roles', fn($q) => $q->where('name', 'user'))
+        //     ->delete();
+
+        // Delete all users (remove optional filter if needed)
+        $count = User::whereIn('id', $request->ids)->delete();
+
+        return response()->json([
+            'success'     => true,
+            'status'      => 200,
+            'message'     => "{$count} user(s) deleted successfully.",
+            'deleted_ids' => $request->ids,
+        ]);
+    }
 
 }
