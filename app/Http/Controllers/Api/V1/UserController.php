@@ -23,7 +23,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Http\JsonResponse;
 use Throwable;
+use Illuminate\Validation\Rule;
 use App\Http\Resources\UserListCollection;
+use Spatie\Permission\Models\Role;
 
 class UserController extends Controller
 {
@@ -606,20 +608,44 @@ class UserController extends Controller
             'name.regex' => "Name can contain only letters.",
         ];
 
-        $rules = [
-            'name' => 'bail|required|min:3|regex:/^[A-Za-z\s\-]+$/',
-            'phone' => 'bail|required|regex:/^([0-9\s\-\+\(\)]*)$/|min:10|max:15,' . $user->id,
-            'email' => 'bail|required|email,' . $user->id,
-            'password' => 'nullable|min:6',
-            'avatar' => [
-                'nullable',
-                'file',
-                'mimes:jpeg,jpg,png,gif',
-                'max:2048',
-            ],
-            'roles' => 'nullable|array',
-            'roles.*' => 'numeric|exists:roles,id',
-        ];
+        
+$rules = [
+    'name' => [
+        'bail',
+        'required',
+        'min:3',
+        'regex:/^[A-Za-z\s\-]+$/',
+    ],
+
+    'phone' => [
+        'bail',
+        'required',
+        'regex:/^[0-9\s\-\+\(\)]+$/',
+        'min:10',
+        'max:15',
+        Rule::unique('users', 'phone')->ignore($user->id),
+    ],
+
+    'email' => [
+        'bail',
+        'required',
+        'email',
+        Rule::unique('users', 'email')->ignore($user->id),
+    ],
+
+    'password' => 'nullable|min:6',
+
+    'avatar' => [
+        'nullable',
+        'file',
+        'mimes:jpeg,jpg,png,gif',
+        'max:2048',
+    ],
+
+    'roles' => 'nullable|array',
+    'roles.*' => 'numeric|exists:roles,id',
+];
+
 
         $validator = Validator::make($request->all(), $rules, $messages);
 
@@ -648,7 +674,7 @@ class UserController extends Controller
         $user->gender = $request->gender;
         if ($request->filled('password')) {
             $user->password = Hash::make($request->password);
-            $user->login_token_version++;
+           // $user->login_token_version++;
 
         }
         $user->user_type = $request->user_type ?? $user->user_type;
