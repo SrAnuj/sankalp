@@ -40,4 +40,11 @@ class Sankalp extends Model
     {
         return $this->hasMany(SankalpProgressLog::class);
     }
+
+    
+    public function dailyTargets(): HasMany
+    {
+        return $this->hasMany(DailyTarget::class);
+    }
+
 }

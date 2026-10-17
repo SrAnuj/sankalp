@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V1\AppleAuthController;
 use App\Http\Controllers\Api\V1\Admin\NaamLibraryController;
 use App\Http\Controllers\Api\V1\SankalpProgressController;
 use App\Http\Controllers\Api\V1\Admin\SankalpController;
+use App\Http\Controllers\Api\V1\Admin\DailyTargetController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -110,13 +111,77 @@ Route::group([
         SankalpController::class, 'show'
     ])->whereNumber('sankalp')->name('sankalps.show');
 
+    Route::put('sankalps/{sankalp}', [SankalpController::class, 'update'])
+        ->whereNumber('sankalp')
+        ->name('sankalps.update');
+
     Route::patch('sankalps/{sankalp}/status', [
         SankalpController::class, 'updateStatus'
     ])->whereNumber('sankalp')->name('sankalps.status');
 
+    Route::delete('sankalps/{sankalp}', [SankalpController::class, 'destroy'])
+        ->whereNumber('sankalp')
+        ->name('sankalps.destroy');
+
+        Route::post('sankalps/bulk-delete', [SankalpController::class, 'bulkDelete'])
+        ->name('sankalps.bulk-delete');
+
     // =========================
-    // Sankalp Admin APIs
+    // Sankalp Progress APIs
     // =========================
+  Route::get(
+    'sankalp-progress',
+    [SankalpProgressController::class, 'index']
+);
+
+Route::post(
+    'sankalp-progress',
+    [SankalpProgressController::class, 'store']
+);
+
+Route::post(
+    'sankalp-progress/{sankalp}/progress',
+    [SankalpProgressController::class, 'addProgress']
+)->whereNumber('sankalp');
+
+Route::get(
+    'sankalp-progress/{sankalp}/daily-progress',
+    [SankalpProgressController::class, 'dailyProgress']
+)->whereNumber('sankalp');
+
+// =========================
+    // Sankalp Daily Target APIs
+    // =========================
+
+ Route::get(
+        'daily-targets',
+        [DailyTargetController::class, 'index']
+    );
+
+    Route::post(
+        'daily-targets',
+        [DailyTargetController::class, 'store']
+    );
+
+    Route::get(
+        'daily-targets/{sankalp}',
+        [DailyTargetController::class, 'show']
+    )->whereNumber('sankalp');
+
+    Route::put(
+        'daily-targets/{sankalp}',
+        [DailyTargetController::class, 'update']
+    )->whereNumber('sankalp');
+
+    Route::get(
+        'daily-targets/{sankalp}/history',
+        [DailyTargetController::class, 'history']
+    )->whereNumber('sankalp');
+
+    Route::get(
+        'daily-targets/{sankalp}/today',
+        [DailyTargetController::class, 'today']
+    )->whereNumber('sankalp');
 
     
 });
