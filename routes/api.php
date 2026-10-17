@@ -4,6 +4,8 @@ use App\Http\Controllers\Api\V1\UserController;
 use App\Http\Controllers\Api\V1\GoogleAuthController;
 use App\Http\Controllers\Api\V1\AppleAuthController;
 use App\Http\Controllers\Api\V1\Admin\NaamLibraryController;
+use App\Http\Controllers\Api\V1\SankalpProgressController;
+use App\Http\Controllers\Api\V1\Admin\SankalpController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -41,68 +43,81 @@ Route::prefix('v1')->group(function () {
 
 });
 
-// Admin Panel
-Route::prefix('v1/admin')
-    ->middleware(['auth:api'])
-    ->name('api.v1.admin.')
-    ->group(function () {
-        // List Naam Library
-        Route::get(
-            'naam-library',
-            [NaamLibraryController::class, 'index']
-        )->name('naam-library.index');
 
-        // Create Naam
-        Route::post(
-            'naam-library',
-            [NaamLibraryController::class, 'store']
-        )->name('naam-library.store');
+// Admin Panel Routes
 
-        // Bulk delete - keep before ID-based routes
-        Route::post(
-            'naam-library/bulk-delete',
-            [NaamLibraryController::class, 'bulkDelete']
-        )->name('naam-library.bulk-delete');
+Route::group([
+    'prefix' => 'v1/admin',
+    'middleware' => ['auth:api'],
+    'as' => 'api.v1.admin.',
+], function () {
 
-        // Show single Naam
-        Route::get(
-            'naam-library/{naam}',
-            [NaamLibraryController::class, 'show']
-        )
-            ->whereNumber('naam')
-            ->name('naam-library.show');
+    // =========================
+    // Naam Library APIs
+    // =========================
 
-        // Update Naam
-        Route::put(
-            'naam-library/{naam}',
-            [NaamLibraryController::class, 'update']
-        )
-            ->whereNumber('naam')
-            ->name('naam-library.update');
+    Route::get('naam-library', [
+        NaamLibraryController::class, 'index'
+    ])->name('naam-library.index');
 
-        // Update status
-        Route::patch(
-            'naam-library/{naam}/status',
-            [NaamLibraryController::class, 'updateStatus']
-        )
-            ->whereNumber('naam')
-            ->name('naam-library.status');
+    Route::post('naam-library', [
+        NaamLibraryController::class, 'store'
+    ])->name('naam-library.store');
 
-        // Update sort order
-        Route::patch(
-            'naam-library/{naam}/sort-order',
-            [NaamLibraryController::class, 'updateSortOrder']
-        )
-            ->whereNumber('naam')
-            ->name('naam-library.sort-order');
+    Route::post('naam-library/bulk-delete', [
+        NaamLibraryController::class, 'bulkDelete'
+    ])->name('naam-library.bulk-delete');
 
-        // Delete single Naam
-        Route::delete(
-            'naam-library/{naam}',
-            [NaamLibraryController::class, 'destroy']
-        )
-            ->whereNumber('naam')
-            ->name('naam-library.destroy');
-    });
+    Route::get('naam-library/{naam}', [
+        NaamLibraryController::class, 'show'
+    ])->whereNumber('naam')->name('naam-library.show');
 
+    Route::put('naam-library/{naam}', [
+        NaamLibraryController::class, 'update'
+    ])->whereNumber('naam')->name('naam-library.update');
+
+    Route::patch('naam-library/{naam}/status', [
+        NaamLibraryController::class, 'updateStatus'
+    ])->whereNumber('naam')->name('naam-library.status');
+
+    Route::patch('naam-library/{naam}/sort-order', [
+        NaamLibraryController::class, 'updateSortOrder'
+    ])->whereNumber('naam')->name('naam-library.sort-order');
+
+    Route::delete('naam-library/{naam}', [
+        NaamLibraryController::class, 'destroy'
+    ])->whereNumber('naam')->name('naam-library.destroy');
+
+
+    // =========================
+    // Sankalp Admin APIs
+    // =========================
+
+    Route::get('sankalps/summary', [
+        SankalpController::class, 'summary'
+    ])->name('sankalps.summary');
+
+    Route::get('sankalps', [
+        SankalpController::class, 'index'
+    ])->name('sankalps.index');
+
+    Route::post('sankalps', [
+        SankalpController::class, 'store'
+    ])->name('sankalps.store');
+
+
+    Route::get('sankalps/{sankalp}', [
+        SankalpController::class, 'show'
+    ])->whereNumber('sankalp')->name('sankalps.show');
+
+    Route::patch('sankalps/{sankalp}/status', [
+        SankalpController::class, 'updateStatus'
+    ])->whereNumber('sankalp')->name('sankalps.status');
+
+    // =========================
+    // Sankalp Admin APIs
+    // =========================
+
+    
+});
 
